@@ -1,16 +1,14 @@
 # go-metrics-stackdriver
+
 [![godoc](https://godoc.org/github.com/google/go-metrics-stackdriver?status.svg)](http://godoc.org/github.com/google/go-metrics-stackdriver)
 
 This library provides a stackdriver sink for applications instrumented with the
 [go-metrics](https://github.com/armon/go-metrics) library.
 
-## 🚨 Warning
+## Why did i fork this? 
 
-__This is not an officially supported Google product.__
+I want to experiment with client side windowed counters and delta type metrics 
 
-In general the author of this package would recommend instrumenting custom metrics for new code by following the [official GCP documentation](https://cloud.google.com/monitoring/custom-metrics), especially for new applications.
-
-This package is intended as a way to publish metrics for applications that are _already_ instrumented with `go-metrics` without having to use a sidecar process like [stackdriver-prometheus-sidecar](https://github.com/Stackdriver/stackdriver-prometheus-sidecar).
 
 ## Details
 
