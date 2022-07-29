@@ -66,6 +66,8 @@ type Sink struct {
 	prefix    string
 	taskInfo  *taskInfo
 
+	counterWindow time.Duration
+
 	monitoredResource *monitoredrespb.MonitoredResource
 
 	mu        sync.Mutex
@@ -114,6 +116,10 @@ type Config struct {
 	// https://cloud.google.com/monitoring/api/resources#tag_generic_task
 	// Optional. Defaults to a combination of hostname+pid.
 	TaskID string
+
+	// the amount of time that local counter will retain increments.
+	// if 0 the window will be infinite
+	CounterWindow time.Duration
 
 	// Debug logging. Errors are always logged to stderr, but setting this to
 	// true will log additional information that is helpful when debugging
@@ -260,6 +266,8 @@ func NewSink(client *monitoring.MetricClient, config *Config) *Sink {
 		s.taskInfo.TaskID = "go-" + strconv.Itoa(os.Getpid()) + "@" + hostname
 	}
 
+	s.counterWindow = config.CounterWindow
+
 	if config.MonitoredResource != nil {
 		s.monitoredResource = config.MonitoredResource
 	} else {
@@ -270,6 +278,8 @@ func NewSink(client *monitoring.MetricClient, config *Config) *Sink {
 
 	// run cancelable goroutine that reports on interval
 	go s.reportOnInterval()
+
+	go s.windowCounters()
 
 	return s
 }
@@ -296,6 +306,26 @@ func (s *Sink) reportOnInterval() {
 			return
 		case <-ticker.C:
 			s.report(s.closeCtx)
+		}
+	}
+}
+
+func (s *Sink) windowCounters() {
+	if s.counterWindow == 0*time.Second {
+		return
+	}
+
+	ticker := time.NewTicker(s.counterWindow)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.closeCtx.Done():
+			return
+		case <-ticker.C:
+			s.mu.Lock()
+			s.counters = make(map[string]*counter)
+			s.mu.Unlock()
 		}
 	}
 }

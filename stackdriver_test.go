@@ -655,6 +655,88 @@ func TestSample(t *testing.T) {
 	}
 }
 
+func TestWindowedSample(t *testing.T) {
+	window := 10 * time.Second
+	ss := newWindowedTestSink(0*time.Second, window, nil)
+
+	tests := []struct {
+		name     string
+		collect  func()
+		createFn func(*testing.T) func(context.Context, *monitoringpb.CreateTimeSeriesRequest) (*emptypb.Empty, error)
+	}{
+		{
+			name: "counter",
+			collect: func() {
+				ss.IncrCounter([]string{"test"}, 1)
+				time.Sleep(window + time.Second)
+				ss.IncrCounter([]string{"test"}, 1)
+				ss.IncrCounter([]string{"test"}, 1)
+			},
+			createFn: func(t *testing.T) func(context.Context, *monitoringpb.CreateTimeSeriesRequest) (*emptypb.Empty, error) {
+				return func(_ context.Context, req *monitoringpb.CreateTimeSeriesRequest) (*emptypb.Empty, error) {
+					want := &monitoringpb.CreateTimeSeriesRequest{
+						Name: "projects/foo",
+						TimeSeries: []*monitoringpb.TimeSeries{
+							{
+								Metric: &metricpb.Metric{
+									Type: "custom.googleapis.com/go-metrics/test_counter",
+								},
+								MetricKind: metricpb.MetricDescriptor_GAUGE,
+								Points: []*monitoringpb.Point{
+									{
+										Value: &monitoringpb.TypedValue{
+											Value: &monitoringpb.TypedValue_DoubleValue{
+												DoubleValue: 2,
+											},
+										},
+									},
+								},
+							},
+						},
+					}
+					if diff := diffCreateMsg(want, req); diff != "" {
+						t.Errorf("unexpected CreateTimeSeriesRequest (-want +got):\n%s", diff)
+					}
+					return &emptypb.Empty{}, nil
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			lis := bufconn.Listen(1024 * 1024)
+			serv := grpc.NewServer()
+			monitoringpb.RegisterMetricServiceServer(serv, &mockMetricServer{
+				createFn: tc.createFn(t),
+			})
+
+			go func() {
+				if err := serv.Serve(lis); err != nil {
+					t.Logf("server error: %v", err)
+				}
+			}()
+
+			conn, err := grpc.Dial(lis.Addr().String(), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return lis.Dial() }), grpc.WithInsecure())
+			if err != nil {
+				t.Fatalf("failed to dial: %v", err)
+			}
+			defer conn.Close()
+			client, err := monitoring.NewMetricClient(ctx, option.WithGRPCConn(conn))
+			if err != nil {
+				t.Fatalf("failed to create MetricClient: %v", err)
+			}
+
+			ss.reset()
+			ss.client = client
+			tc.collect()
+			ss.report(ctx)
+		})
+	}
+}
+
 func TestExtract(t *testing.T) {
 	ss := newTestSink(0*time.Second, nil)
 	ss.extractor = func(key []string, kind string) ([]string, []metrics.Label, error) {
@@ -1045,6 +1127,25 @@ func newTestSink(interval time.Duration, client *monitoring.MetricClient) *Sink 
 	s.extractor = DefaultLabelExtractor
 	s.log = log.New(os.Stderr, "go-metrics-stackdriver: ", log.LstdFlags)
 	s.reset()
+	go s.reportOnInterval()
+	return s
+}
+
+// Skips defaults that are not appropriate for tests.
+func newWindowedTestSink(interval, window time.Duration, client *monitoring.MetricClient) *Sink {
+	s := &Sink{}
+	s.taskInfo = &taskInfo{
+		ProjectID: "foo",
+	}
+	s.closeCtx = context.Background()
+	s.prefix = "go-metrics/"
+	s.interval = interval
+	s.bucketer = DefaultBucketer
+	s.extractor = DefaultLabelExtractor
+	s.counterWindow = window
+	s.log = log.New(os.Stderr, "go-metrics-stackdriver: ", log.LstdFlags)
+	s.reset()
+	go s.windowCounters()
 	go s.reportOnInterval()
 	return s
 }
