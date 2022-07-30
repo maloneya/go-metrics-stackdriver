@@ -279,8 +279,6 @@ func NewSink(client *monitoring.MetricClient, config *Config) *Sink {
 	// run cancelable goroutine that reports on interval
 	go s.reportOnInterval()
 
-	go s.windowCounters()
-
 	return s
 }
 
@@ -323,6 +321,9 @@ func (s *Sink) windowCounters() {
 		case <-s.closeCtx.Done():
 			return
 		case <-ticker.C:
+			if s.debugLogs {
+				s.log.Println("Resetting counters")
+			}
 			s.mu.Lock()
 			s.counters = make(map[string]*counter)
 			s.mu.Unlock()
@@ -368,6 +369,7 @@ func (s *Sink) deep() (time.Time, map[string]*gauge, map[string]*counter, map[st
 		copy(r.counts, v.counts)
 		rHistograms[k] = r
 	}
+	s.counters = make(map[string]*counter)
 	s.mu.Unlock()
 
 	return end, rGauges, rCounters, rHistograms
@@ -567,8 +569,10 @@ func (s *Sink) IncrCounterWithLabels(key []string, val float32, labels []metrics
 
 	c, ok := s.counters[n.hash]
 	if ok {
+		s.log.Printf("incr key %v\n", n.hash)
 		c.value += float64(val)
 	} else {
+		s.log.Printf("create counter %v\n", n.hash)
 		s.counters[n.hash] = &counter{
 			name:  n,
 			value: float64(val),
