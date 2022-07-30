@@ -371,6 +371,7 @@ func (s *Sink) report(ctx context.Context) {
 	end, rGauges, rCounters, rHistograms := s.deep()
 
 	s.windowCounters()
+	s.lastReport = time.Now()
 
 	// https://cloud.google.com/monitoring/api/resources
 	resource := s.monitoredResource
