@@ -657,7 +657,9 @@ func TestSample(t *testing.T) {
 
 func TestWindowedSample(t *testing.T) {
 	window := 10 * time.Second
-	ss := newWindowedTestSink(0*time.Second, window, nil)
+	windows := 2
+	ss := newTestSink(0*time.Second, nil)
+	ss.counterWindow = window
 
 	tests := []struct {
 		name     string
@@ -667,8 +669,6 @@ func TestWindowedSample(t *testing.T) {
 		{
 			name: "counter",
 			collect: func() {
-				ss.IncrCounter([]string{"test"}, 1)
-				time.Sleep(window + time.Second)
 				ss.IncrCounter([]string{"test"}, 1)
 				ss.IncrCounter([]string{"test"}, 1)
 			},
@@ -731,8 +731,11 @@ func TestWindowedSample(t *testing.T) {
 
 			ss.reset()
 			ss.client = client
-			tc.collect()
-			ss.report(ctx)
+			for i := 0; i < windows; i++ {
+				tc.collect()
+				ss.report(ctx)
+				time.Sleep(window + time.Second)
+			}
 		})
 	}
 }
@@ -1127,25 +1130,6 @@ func newTestSink(interval time.Duration, client *monitoring.MetricClient) *Sink 
 	s.extractor = DefaultLabelExtractor
 	s.log = log.New(os.Stderr, "go-metrics-stackdriver: ", log.LstdFlags)
 	s.reset()
-	go s.reportOnInterval()
-	return s
-}
-
-// Skips defaults that are not appropriate for tests.
-func newWindowedTestSink(interval, window time.Duration, client *monitoring.MetricClient) *Sink {
-	s := &Sink{}
-	s.taskInfo = &taskInfo{
-		ProjectID: "foo",
-	}
-	s.closeCtx = context.Background()
-	s.prefix = "go-metrics/"
-	s.interval = interval
-	s.bucketer = DefaultBucketer
-	s.extractor = DefaultLabelExtractor
-	s.counterWindow = window
-	s.log = log.New(os.Stderr, "go-metrics-stackdriver: ", log.LstdFlags)
-	s.reset()
-	go s.windowCounters()
 	go s.reportOnInterval()
 	return s
 }
